@@ -15,6 +15,7 @@ from torch.cuda import is_available as cuda_available, empty_cache
 from os.path import join
 from copy import deepcopy
 import warnings
+import similarity as sim
 warnings.filterwarnings("ignore")
 
 
@@ -49,24 +50,17 @@ class TA_GP():
     """
     Class for the GP model.
     """
-    def __init__(self, training_data, output_col=6, kernel="matern", nu=0.5, thres = 0.01, random = True, ranges = [1, 1, 1, 1, 1], output_file = "output.csv"):
+    def __init__(self, training_data, output_col=6, kernel="matern", nu=0.5, thres = 0.01, ranges = [1, 1, 1, 1, 1], output_file = "output.csv"):
         if output_col <= 6: # 5 or 6
             self.output_type = "Gens to 99 percent"
         elif output_col <= 8: # 7 or 8
             self.output_type = "Rate after 100 gens"
         else:
             raise("The only model output columns this GP can be trained on are 5/6 and 7/8.")
+        
         data = pd.read_csv(join("data", training_data))
-        
         data = data.to_numpy(dtype="float")
-        if random:
-            data = np.insert(data, 4, [np.random.random(data.shape[0])], axis = 1)
-            self.index = 5
-        else:
-            self.index = 4
-        
-        # Remove problematic points
-        data = similarity(data, thres, output_file, self.index, ranges, random)
+        self.index = 4
         
         # The model input parameters in the training set.
         self.train_x = torch.from_numpy(data[:,:self.index]).float().contiguous() # 4 to 5
@@ -251,17 +245,24 @@ class TA_GP():
         dataset = search_points.to_numpy(dtype="float")[:,:self.index] # 4 to 5
         mean, lower, upper = self.predict(search_points)
         mean, lower, upper = mean.numpy(), lower.numpy(), upper.numpy()
-        value_of_points = upper - lower
-        if stochastic:
-            value_of_points /= value_of_points.sum()
-            value_of_points[-1] = value_of_points[-1] + (1 - value_of_points.sum())
-            selected_points = np.random.choice(len(value_of_points), num_points,  replace=False, p=value_of_points)
-        else:
-            # Non-random point selection: the list is sorted by 95%CI width, and the top "num_points" points are selected.
-            # This method of selecting additional points may be innapropriate
-            # depending on the nature of the list of candadate points!
-            selected_points = np.argpartition(value_of_points, -num_points)[-num_points:]
-        points = [dataset[i].tolist() for i in selected_points]
+
+        selected_points = np.array([])
+        while (len(selected_points) < num_points):
+            value_of_points = upper - lower
+            if stochastic:
+                value_of_points /= value_of_points.sum()
+                value_of_points[-1] = value_of_points[-1] + (1 - value_of_points.sum())
+                selected_points = np.concatenate((selected_points, np.random.choice(len(value_of_points), num_points,  replace=False, p=value_of_points)))
+            else:
+                # Non-random point selection: the list is sorted by 95%CI width, and the top "num_points" points are selected.
+                # This method of selecting additional points may be innapropriate
+                # depending on the nature of the list of candadate points!
+                selected_points = np.concatenate((selected_points, np.argpartition(value_of_points, -num_points)[-num_points:]))
+        
+            selected_points = sim.detectSimilarPoints(self.train_x, selected_points, [1, 1, 1, 1], 0.1)
+        
+        # Retrict to first set of points if more than the max
+        points = [dataset[i].tolist() for i in selected_points[:num_points]]
 
         # The points are output in an sh script to locally run the next set of simulations.
         max_simultaneous_procs = 10
@@ -282,31 +283,3 @@ class TA_GP():
             f.write("wait\ncd data\ncat *.part > adaptive.csv\nrm *.part")
             f.write('\n')
         print("Done.")
-
-def similarity(data, thres, out_file = "output.csv", ycol = 5, ranges = [1, 1, 1, 1, 1], random = True):
-    if random:
-        cols = ['DRIVE_FITNESS_VALUE', 'DROP_RATE', 'EMBRYO_RESISTANCE_RATE', 'GERMLINE_RESISTANCE_RATE', 'Random Number',
-            'Gens to 99 percent', 'Gens to 99 percent SE', 'Rate after 100 gens', 'Rate after 100 gens SE']
-    else:
-        cols = ['DRIVE_FITNESS_VALUE', 'DROP_RATE', 'EMBRYO_RESISTANCE_RATE', 'GERMLINE_RESISTANCE_RATE',
-            'Gens to 99 percent', 'Gens to 99 percent SE', 'Rate after 100 gens', 'Rate after 100 gens SE']
-    delete_rows = []
-    for row1 in data:
-        row_num = 0
-        for row2 in data:
-            row_num += 1
-            diffs = []
-            if (not np.array_equal(row1, row2)):
-                if random:
-                    distance = ((row1[0]-row2[0])/ranges[0]) ** 2 + ((row1[1]-row2[1])/ranges[1]) ** 2 + ((row1[2]-row2[2])/ranges[2]) ** 2 + ((row1[3]-row2[3])/ranges[3]) ** 2 + ((row1[4]-row2[4])/ranges[4]) ** 2
-                else:
-                    distance = ((row1[0]-row2[0])/ranges[0]) ** 2 + ((row1[1]-row2[1])/ranges[1]) ** 2 + ((row1[2]-row2[2])/ranges[2]) ** 2 + ((row1[3]-row2[3])/ranges[3]) ** 2
-                if (distance < thres ** 2):
-                    print(distance)
-                    print(row_num + 1)
-                    print('---')
-                    delete_rows.append(row_num)
-    final_df = np.delete(data, delete_rows, axis = 0)
-    final_df = pd.DataFrame(final_df, columns = cols)
-    final_df.to_csv(out_file, index = False)
-    return final_df.to_numpy(dtype="float")
