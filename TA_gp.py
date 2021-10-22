@@ -15,7 +15,7 @@ from torch.cuda import is_available as cuda_available, empty_cache
 from os.path import join
 from copy import deepcopy
 import warnings
-import similarity as sim
+from similarity import *
 warnings.filterwarnings("ignore")
 
 
@@ -236,7 +236,7 @@ class TA_GP():
         sa_df.append(f"TARE sensitivity analysis ({self.output_type})")
         return sa_df
 
-    def get_adaptive_points(self, num_points=100, output_filename="adaptive_run.sh", stochastic=False):
+    def get_adaptive_points(self, num_points=100, output_filename="adaptive_run.sh", stochastic=False, thres=0.1):
         """
         Generates a new adaptively sampled data set.
         """
@@ -249,20 +249,25 @@ class TA_GP():
         selected_points = np.array([])
         while (len(selected_points) < num_points):
             value_of_points = upper - lower
+            print('Number of New Points:', len(selected_points))
+            input_1 = selected_points[0] if len(selected_points) else selected_points
+
             if stochastic:
                 value_of_points /= value_of_points.sum()
                 value_of_points[-1] = value_of_points[-1] + (1 - value_of_points.sum())
-                selected_points = np.concatenate((selected_points, np.random.choice(len(value_of_points), num_points,  replace=False, p=value_of_points)))
+                input_2 = np.random.choice(len(value_of_points), num_points,  replace=False, p=value_of_points)
             else:
                 # Non-random point selection: the list is sorted by 95%CI width, and the top "num_points" points are selected.
                 # This method of selecting additional points may be innapropriate
                 # depending on the nature of the list of candadate points!
-                selected_points = np.concatenate((selected_points, np.argpartition(value_of_points, -num_points)[-num_points:]))
-        
-            selected_points = sim.detectSimilarPoints(self.train_x, selected_points, [1, 1, 1, 1], 0.1)
-        
-        # Retrict to first set of points if more than the max
-        points = [dataset[i].tolist() for i in selected_points[:num_points]]
+                input_2 = np.argpartition(value_of_points, -num_points)[-num_points:]
+         
+            selected_points = np.concatenate((input_1, input_2)).astype(int)
+            points = [dataset[int(i)].tolist() for i in selected_points]
+            selected_points = detectSimilarPoints(self.train_x, points, [1, 1, 1, 1], thres)
+
+        # Restrict to first set of points if more than the max
+        points = selected_points[:num_points]
 
         # The points are output in an sh script to locally run the next set of simulations.
         max_simultaneous_procs = 10
