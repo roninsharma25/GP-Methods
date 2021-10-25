@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import torch
-from gpytorch.kernels import ScaleKernel, MaternKernel, RBFKernel, PeriodicKernel
+from gpytorch.kernels import Kernel, ScaleKernel, MaternKernel, RBFKernel, PeriodicKernel, PolynomialKernel, RQKernel
 from gpytorch.means import ConstantMean
 from gpytorch.models import ExactGP
 from gpytorch.distributions import MultivariateNormal
@@ -19,23 +19,44 @@ from similarity import *
 warnings.filterwarnings("ignore")
 
 
+class CompoundKernel(Kernel):
+    def __init__(self, kernel_1, kernel_2, operation):
+        super(CompoundKernel, self).__init__()
+        self.kernel_1 = kernel_1
+        self.kernel_2 = kernel_2
+        self.operation = operation
+
+    def forward(self, x1, x2):
+        if self.operation == 'add':
+            output = self.kernel_1(x1, x2) + self.kernel_2(x1, x2)
+        
+        return ScaleKernel(output)
 class GPRegressionModel(ExactGP):
     """
     The gpytorch model underlying the TA_GP class.
     """
-    def __init__(self, train_x, train_y, likelihood, kernel="matern", nu=0.5, index = 5):
+    def __init__(self, train_x, train_y, likelihood, kernel="matern", nu=0.5, power=4, index = 5, compound = False, k1 = None, k2 = None):
         """
         Constructor that creates objects necessary for evaluating GP.
         """
         super(GPRegressionModel, self).__init__(train_x, train_y, likelihood)
         self.mean_module = ConstantMean()
         # The Mattern Kernal is particularly well suited to models with abrupt transitions between success and failure.
+        if compound:
+            self.covar_module(CompoundKernel(k1, k2, 'add'))
         if kernel == "matern":
-            self.covar_module = ScaleKernel(MaternKernel(nu=nu, ard_num_dims=index)) # 4 to 5
+            self.covar_module = ScaleKernel(MaternKernel(nu=nu, ard_num_dims=4))
         elif kernel == "rbf":
             self.covar_module = ScaleKernel(RBFKernel())
+        elif kernel == "periodic":
+            self.covar_module = ScaleKernel(PeriodicKernel())
+        elif kernel == "polynomial":
+            self.covar_module = ScaleKernel(PolynomialKernel(power=power))
+        elif kernel == 'rq': # mixture of RBF kernels
+            self.covar_module = ScaleKernel(RQKernel())
         else:
-            raise Exception("Kernel must be from [matern, rbf].")
+            raise Exception("Kernel must be from [matern, rbf, periodic, polynomial, rq].")
+
 
     def forward(self, x):
         """
@@ -50,7 +71,7 @@ class TA_GP():
     """
     Class for the GP model.
     """
-    def __init__(self, training_data, output_col=6, kernel="matern", nu=0.5, thres = 0.01, ranges = [1, 1, 1, 1, 1], output_file = "output.csv"):
+    def __init__(self, training_data, output_col=6, kernel="matern", nu=0.5, thres = 0.01, ranges = [1, 1, 1, 1, 1], output_file = "output.csv", compound = False, k1 = None, k2 = None):
         if output_col <= 6: # 5 or 6
             self.output_type = "Gens to 99 percent"
         elif output_col <= 8: # 7 or 8
@@ -73,7 +94,7 @@ class TA_GP():
         if cuda_available():
             self.y_noise = self.y_noise.cuda()
         self.likelihood = FixedNoiseGaussianLikelihood(self.y_noise, learn_additional_noise=False)
-        self.model = GPRegressionModel(self.train_x, self.train_y, self.likelihood, kernel=kernel, nu=nu, index=self.index)
+        self.model = GPRegressionModel(self.train_x, self.train_y, self.likelihood, kernel=kernel, nu=nu, index=self.index, compound = False, k1 = None, k2 = None)
 
         if cuda_available():
             self.train_x, self.train_y, self.likelihood, self.model = self.train_x.cuda(), self.train_y.cuda(), self.likelihood.cuda(), self.model.cuda()
