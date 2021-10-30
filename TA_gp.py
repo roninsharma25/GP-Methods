@@ -29,6 +29,8 @@ class CompoundKernel(Kernel):
     def forward(self, x1, x2):
         if self.operation == 'add':
             output = self.kernel_1(x1, x2) + self.kernel_2(x1, x2)
+        elif self.operation == 'mul':
+            output = self.kernel_1(x1, x2) * self.kernel_2(x1, x2)
         
         return ScaleKernel(output)
 class GPRegressionModel(ExactGP):
