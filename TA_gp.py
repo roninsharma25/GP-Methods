@@ -33,6 +33,7 @@ class CompoundKernel(Kernel):
             output = self.kernel_1(x1, x2) * self.kernel_2(x1, x2)
         
         return ScaleKernel(output)
+
 class GPRegressionModel(ExactGP):
     """
     The gpytorch model underlying the TA_GP class.
@@ -81,7 +82,7 @@ class TA_GP():
         else:
             raise("The only model output columns this GP can be trained on are 5/6 and 7/8.")
         
-        data = pd.read_csv(join("data", training_data))
+        data = pd.read_csv(join("data", training_data), error_bad_lines = False)
         data = data.to_numpy(dtype="float")
         self.index = 4
         
@@ -259,7 +260,7 @@ class TA_GP():
         sa_df.append(f"TARE sensitivity analysis ({self.output_type})")
         return sa_df
 
-    def get_adaptive_points(self, num_points=100, output_filename="adaptive_run.sh", stochastic=False, thres=0.1):
+    def get_adaptive_points(self, num_points=100, output_filename="adaptive_run.sh", stochastic=False, n = 4):
         """
         Generates a new adaptively sampled data set.
         """
@@ -268,6 +269,7 @@ class TA_GP():
         dataset = search_points.to_numpy(dtype="float")[:,:self.index] # 4 to 5
         mean, lower, upper = self.predict(search_points)
         mean, lower, upper = mean.numpy(), lower.numpy(), upper.numpy()
+        thres = n ** 0.5 * 0.01 # n ** 0.5 * 1%
 
         selected_points = np.array([])
         while (len(selected_points) < num_points):
