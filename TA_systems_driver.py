@@ -18,18 +18,18 @@ def parse_slim(slim_string, results):
     """
     slim_lines = slim_string.split('\n')
     for line in slim_lines:
-        gen_to_99 = 0
-        end_rate = 0
+        #gen_to_99 = 0
+        #end_rate = 0
         if line.startswith("GENS_TO_99:"):
             gen_to_99 = int(line.split("GENS_TO_99:")[1])
         if line.startswith("END_DRIVE_RATE:"):
             end_rate = float(line.split("END_DRIVE_RATE:")[1])
 
-        # Increment results.
-        results["Gens to 99 percent"] += gen_to_99
-        results["Rate after 100 gens"] += end_rate
-        results["Gens to 99 percent SE"].append(gen_to_99)
-        results["Rate after 100 gens SE"].append(end_rate)
+    # Increment results.
+    results["Gens to 99 percent"] += gen_to_99
+    results["Rate after 100 gens"] += end_rate
+    results["Gens to 99 percent SE"].append(gen_to_99)
+    results["Rate after 100 gens SE"].append(end_rate)
 
 
 def main():
